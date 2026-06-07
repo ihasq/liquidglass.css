@@ -24,6 +24,18 @@ import {
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
+export type BackdropSvgFilterSupport =
+  | { ok: true; reason: 'chromium-svg-backdrop-filter' | 'forced' }
+  | {
+      ok: false;
+      reason:
+        | 'non-browser'
+        | 'unsupported-browser'
+        | 'disabled'
+        | 'too-large'
+        | 'renderer-failed';
+    };
+
 /**
  * Glass type to Cauchy coefficients mapping
  */
@@ -117,6 +129,14 @@ function createSVGElement<K extends keyof SVGElementTagNameMap>(
   return el;
 }
 
+function clampPercent(value: number): number {
+  return Math.max(0, Math.min(100, value));
+}
+
+function getSaturationValue(saturationPercent: number): string {
+  return (1 + clampPercent(saturationPercent) / 100).toFixed(2);
+}
+
 /**
  * Calculate displacement map smoothing blur value
  */
@@ -162,8 +182,7 @@ export function createFilterDOM(
   // Calculate parameter values
   const scale = params.refraction * 2;
   const blurStdDev = (params.softness / 100) * 5;
-  // Computed for forward-compat only — see comment near `saturate` below.
-  const saturationVal = (params.saturation / 100) * 20;
+  const saturationVal = getSaturationValue(params.saturation);
   const slopeBlurStdDev = (params.dispersion / 100) * 6;
   const slopeIntensity = (params.dispersion / 100) * 1.5;
   const dmapSmoothBlur = calculateSmoothingBlur(params.displacementSmoothing, resolutionScale);
@@ -450,11 +469,19 @@ export function createFilterDOM(
   });
   filter.appendChild(colorFlood);
 
+  const saturate = createSVGElement('feColorMatrix', {
+    in: 'r',
+    type: 'saturate',
+    values: saturationVal,
+    result: 'saturated',
+  });
+  filter.appendChild(saturate);
+
   // feBlend composites the color over the displaced background
   // mode="normal" with alpha blending for proper transparency
   const colorBlend = createSVGElement('feBlend', {
     in: 'colorFill',
-    in2: 'r',
+    in2: 'saturated',
     mode: 'normal',
     result: 'tinted',
   });
@@ -462,10 +489,6 @@ export function createFilterDOM(
 
   // Final output is `tinted` (the displaced + color-tinted background).
   // Specular is rendered separately via CSS Paint API (see specular-worklet.js).
-  //
-  // Note: saturation parameter is accepted in schema but currently unused.
-  // Could be applied via CSS filter: saturate(...) if desired.
-  void saturationVal;
 
   return {
     filter,
@@ -491,6 +514,7 @@ export function createFilterDOM(
       blendRGB,
       colorFlood,
       colorBlend,
+      saturate,
     },
   };
 }
@@ -540,6 +564,7 @@ export function updateFilterParams(
 ): void {
   const scale = params.refraction * 2;
   const blurStdDev = (params.softness / 100) * 5;
+  const saturationVal = getSaturationValue(params.saturation);
   const slopeBlurStdDev = (params.dispersion / 100) * 6;
   const slopeIntensity = (params.dispersion / 100) * 1.5;
   const dmapSmoothBlur = calculateSmoothingBlur(params.displacementSmoothing, resolutionScale);
@@ -579,11 +604,7 @@ export function updateFilterParams(
   // Update color tint
   const glassColor = params.color || '#ffffff00';
   refs.colorFlood.setAttribute('flood-color', glassColor);
-
-  // refs.saturate is intentionally NOT touched — see svg-builder createFilterDOM
-  // for the rationale (saturate primitive is detached from the filter chain
-  // to avoid global brightness boost; `saturation` schema param is currently
-  // unused in this PoC).
+  refs.saturate.setAttribute('values', saturationVal);
 }
 
 /**
@@ -601,10 +622,39 @@ export function updateMorphWeights(
 /**
  * Check if browser supports SVG filters in backdrop-filter
  */
+export function getBackdropSvgFilterSupport(): BackdropSvgFilterSupport {
+  if (
+    typeof window === 'undefined' ||
+    typeof document === 'undefined' ||
+    typeof navigator === 'undefined'
+  ) {
+    return { ok: false, reason: 'non-browser' };
+  }
+
+  const force = getComputedStyle(document.documentElement)
+    .getPropertyValue('--glass-force-svg-backdrop-filter')
+    .trim();
+
+  if (force === '1') return { ok: true, reason: 'forced' };
+  if (force === '0') return { ok: false, reason: 'disabled' };
+
+  const userAgent = navigator.userAgent;
+  const vendor = navigator.vendor;
+  const isChrome = /Chrome/.test(userAgent) && /Google Inc/.test(vendor);
+  const isEdgeChromium = /Edg/.test(userAgent);
+
+  if (isChrome || isEdgeChromium) {
+    return { ok: true, reason: 'chromium-svg-backdrop-filter' };
+  }
+
+  return { ok: false, reason: 'unsupported-browser' };
+}
+
+/**
+ * Backward-compatible boolean support check.
+ */
 export function supportsBackdropSvgFilter(): boolean {
-  const isChrome = /Chrome/.test(navigator.userAgent) && /Google Inc/.test(navigator.vendor);
-  const isEdgeChromium = /Edg/.test(navigator.userAgent);
-  return isChrome || isEdgeChromium;
+  return getBackdropSvgFilterSupport().ok;
 }
 
 // ─────────────────────────────────────────────────────────────

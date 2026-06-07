@@ -12,6 +12,7 @@ export {
   updateMorphWeights,
   calculateSmoothingBlur,
   calculateChromaticScales,
+  getBackdropSvgFilterSupport,
   supportsBackdropSvgFilter,
 } from './builder';
 

@@ -12,6 +12,16 @@
       "import": "./dist/liquidglass.js",
       "default": "./dist/liquidglass.js"
     },
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "import": "./dist/runtime.js",
+      "default": "./dist/runtime.js"
+    },
+    "./tailwind": {
+      "types": "./dist/tailwind.d.ts",
+      "import": "./dist/tailwind.js",
+      "default": "./dist/tailwind.js"
+    },
     "./stylex": {
       "types": "./dist/ports/stylex.d.ts",
       "import": "./dist/stylex.js",
@@ -70,6 +80,8 @@
     "test:types": "node test/integrity/index.mjs --only=types",
     "test:build": "node test/integrity/index.mjs --only=build",
     "test:smt": "node test/integrity/index.mjs --only=smt",
+    "test:ssr": "npm run build && node test/integrity/ssr-import.mjs",
+    "test:perf": "node test/perf/render-budget.mjs",
     "test:e2e": "npx serve test -l 3333 --no-clipboard",
     "test:e2e:headed": "node test/e2e/runner.mjs --headed",
     "test:e2e:verbose": "node test/e2e/runner.mjs --verbose",

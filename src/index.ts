@@ -26,6 +26,7 @@ export type {
 export {
   FilterManager,
   getDefaultManager,
+  getBackdropSvgFilterSupport,
   supportsBackdropSvgFilter,
   preloadWasm,
   preloadWebGL2,

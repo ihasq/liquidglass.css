@@ -37,8 +37,8 @@ export type {
 
 export { DEFAULT_PARAMS, VALID_RENDERERS } from './types';
 
-// Re-export browser support check from SVG module
-export { supportsBackdropSvgFilter } from '../svg';
+// Re-export browser support checks from SVG module
+export { getBackdropSvgFilterSupport, supportsBackdropSvgFilter } from '../svg';
 
 // Re-export preload functions from displacement module
 export { preloadWasm, preloadWebGL2, preloadWebGPU } from '../displacement';

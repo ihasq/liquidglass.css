@@ -257,6 +257,7 @@ import {
   updateMorphWeights,
   calculateSmoothingBlur,
   supportsBackdropSvgFilter,
+  getBackdropSvgFilterSupport,
 } from '../svg/builder';
 import {
   __DEV__,
@@ -288,12 +289,13 @@ import {
 } from './utils';
 
 // Re-export for convenience
-export { supportsBackdropSvgFilter } from '../svg/builder';
+export { getBackdropSvgFilterSupport, supportsBackdropSvgFilter } from '../svg/builder';
 export { preloadWasm } from '../displacement/wasm-generator';
 export { preloadWebGL2 } from '../displacement/webgl2-generator';
 export { preloadWebGPU } from '../displacement/webgpu-generator';
 export { DEFAULT_PARAMS } from './types';
 
+const MAX_DISPLACEMENT_PIXELS = 1024 * 1024;
 
 /**
  * Core FilterManager class
@@ -554,6 +556,9 @@ export class FilterManager {
       // Renderer switching state
       lastRenderer: null,
       renderInProgress: false,
+      renderQueued: false,
+      queuedParams: null,
+      queuedIsLowRes: false,
       // Displacement bitmap cache (two tiers for isLowRes/isHighRes).
       // Specular has no cache here — CSS Paint Worklet handles it.
       lastDispDataUrlLow: null,
@@ -792,8 +797,11 @@ export class FilterManager {
     // CONCURRENCY CHECK: Skip if another render is in progress for this element
     // This prevents race conditions during rapid resize/parameter changes
     if (state.renderInProgress) {
+      state.renderQueued = true;
+      state.queuedParams = params;
+      state.queuedIsLowRes = isLowRes;
       if (__DEV__) {
-        console.debug('[LiquidGlass] Skipping render - previous render in progress');
+        console.debug('[LiquidGlass] Queueing render - previous render in progress');
         _profilerEndFrame();
       }
       return;
@@ -811,7 +819,10 @@ export class FilterManager {
       if (previousRenderer === 'wasm' && isWasmGenerationInProgress()) {
         // WASM is still generating - skip this render frame
         // The generation lock will be released when WASM completes
-        state.renderInProgress = false;
+        state.renderQueued = true;
+        state.queuedParams = params;
+        state.queuedIsLowRes = isLowRes;
+        this._finishRender(element, state);
         if (__DEV__) {
           console.debug('[LiquidGlass] Waiting for WASM generation to complete before switching renderer');
           _profilerEndFrame();
@@ -850,15 +861,17 @@ export class FilterManager {
     }
 
     if (width <= 0 || height <= 0) {
-      state.renderInProgress = false;  // Release lock before early return
+      this._finishRender(element, state);
       if (__DEV__) _profilerEndFrame();
       return;
     }
 
     // Check browser support
-    if (!supportsBackdropSvgFilter()) {
-      this._applyFallback(element);
-      state.renderInProgress = false;  // Release lock before early return
+    const backdropSupport = getBackdropSvgFilterSupport();
+    this._setBackdropDataset(backdropSupport, currentRenderer);
+    if (!backdropSupport.ok) {
+      this._applyFallback(element, backdropSupport.reason);
+      this._finishRender(element, state);
       if (__DEV__) _profilerEndFrame();
       return;
     }
@@ -954,6 +967,13 @@ export class FilterManager {
     const resolutionScale = Math.max(0.1, Math.min(1, targetResolution / 100));
     const renderWidth = Math.max(16, Math.round(baseWidth * resolutionScale));
     const renderHeight = Math.max(16, Math.round(baseHeight * resolutionScale));
+    if (renderWidth * renderHeight > MAX_DISPLACEMENT_PIXELS) {
+      this._applyFallback(element, 'too-large');
+      this._setBackdropDataset({ ok: false, reason: 'too-large' }, currentRenderer);
+      this._finishRender(element, state);
+      if (__DEV__) _profilerEndFrame();
+      return;
+    }
 
     if (__DEV__) {
       logProgressive(`Rendering at ${isLowRes ? 'LOW' : 'HIGH'} resolution`, {
@@ -1006,7 +1026,8 @@ export class FilterManager {
       if (__DEV__) _profilerEndStep('displacementMap');
       if (!dispResult) {
         console.warn('Liquid Glass: Displacement map generation failed (all backends)');
-        state.renderInProgress = false;
+        this._applyFallback(element, 'renderer-failed');
+        this._finishRender(element, state);
         if (__DEV__) _profilerEndFrame();
         return;
       }
@@ -1118,10 +1139,28 @@ export class FilterManager {
     }
 
     // Release render lock (normal completion)
-    state.renderInProgress = false;
+    this._finishRender(element, state);
 
     // End frame profiling
     if (__DEV__) _profilerEndFrame();
+  }
+
+  private _finishRender(element: HTMLElement, state: FilterState): void {
+    state.renderInProgress = false;
+
+    if (!state.renderQueued || this._registry.get(element) !== state) return;
+
+    const queuedParams = state.queuedParams ?? state.params;
+    const queuedIsLowRes = state.queuedIsLowRes;
+    state.renderQueued = false;
+    state.queuedParams = null;
+    state.queuedIsLowRes = false;
+
+    queueMicrotask(() => {
+      if (this._registry.get(element) === state) {
+        void this._render(element, queuedParams, queuedIsLowRes);
+      }
+    });
   }
 
   private _createFilter(
@@ -1133,6 +1172,9 @@ export class FilterManager {
     height: number,
     resolutionScale: number = 1
   ): void {
+    element.dataset.liquidglassBackdropSvg = '1';
+    delete element.dataset.liquidglassFallbackReason;
+
     const svg = getSvgRoot();
     const defs = svg.querySelector('defs')!;
 
@@ -1232,9 +1274,11 @@ export class FilterManager {
     state.morphAnimationId = requestAnimationFrame(animate);
   }
 
-  private _applyFallback(element: HTMLElement): void {
+  private _applyFallback(element: HTMLElement, reason = 'unsupported-browser'): void {
     const state = this._registry.get(element);
     if (!state) return;
+    element.dataset.liquidglassBackdropSvg = '0';
+    element.dataset.liquidglassFallbackReason = reason;
 
     if (!element.contains(state.markerElement)) {
       element.appendChild(state.markerElement);
@@ -1256,6 +1300,15 @@ export class FilterManager {
       `${selector} { backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }`,
       sheet.cssRules.length
     );
+  }
+
+  private _setBackdropDataset(
+    support: ReturnType<typeof getBackdropSvgFilterSupport>,
+    renderer: LiquidGlassParams['displacementRenderer']
+  ): void {
+    document.documentElement.dataset.liquidglassRenderer = renderer;
+    document.documentElement.dataset.liquidglassBackdropSvg = support.ok ? '1' : '0';
+    document.documentElement.dataset.liquidglassBackdropReason = support.reason;
   }
 
   /**

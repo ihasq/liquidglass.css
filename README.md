@@ -48,8 +48,8 @@
 - **CSS Paint Worklet Specular** — Phong highlight via Canvas2D, no
   per-pixel loop, repaints on geometry/parameter change automatically
 - **Auto Radius Tracking** — `border-radius` is mirrored to
-  `--glass-radius` via a global MutationObserver + ResizeObserver
-- **Tailwind CSS v4** — Native plugin via `@plugin "liquidglass.css"`
+  `--glass-radius` for tracked glass elements
+- **Tailwind CSS v4** — Native plugin via `@plugin "liquidglass.css/tailwind"`
 - **CSS-in-JS** — First-class support for Emotion, styled-components, StyleX, Vanilla Extract, Panda CSS, UnoCSS
 - **Framework Agnostic** — Works with React, Vue, Svelte, or vanilla
 - **Adaptive Performance** — Smart throttling at scale
@@ -95,7 +95,7 @@ import "liquidglass.css";
 
 ```css
 @import "tailwindcss";
-@plugin "liquidglass.css";
+@plugin "liquidglass.css/tailwind";
 ```
 
 ```html
@@ -121,7 +121,7 @@ All parameters are available as utilities:
 | `glass-specular-shininess-{value}` | `--glass-specular-shininess` |
 | `glass-{value}` | `--glass-refraction` (shorthand) |
 
-Arbitrary values work: `glass-refraction-[73%]`, `glass-specular-angle-[-45deg]}`, `glass-type-[dense-flint]`.
+Arbitrary values work: `glass-refraction-[73%]`, `glass-specular-angle-[-45deg]`, `glass-type-[dense-flint]`.
 
 ## StyleX
 
@@ -476,16 +476,31 @@ import "liquidglass.css";
 </div>
 ```
 
-## Browser Support
+## Compatibility
 
-| Browser | Version | Notes |
-|---------|---------|-------|
-| Chrome | 105+ | Full support (CSS Paint API + backdrop-filter SVG) |
-| Edge | 105+ | Full support |
-| Safari | — | backdrop-filter SVG not supported |
-| Firefox | — | backdrop-filter SVG / CSS Paint API not supported |
+liquidglass.css is Chromium-first.
 
-> **Note:** Unsupported browsers gracefully fall back to `backdrop-filter: blur(20px)`. The specular bezel layer simply doesn't render when CSS Paint API is missing.
+- Full SVG backdrop displacement path: Chromium / Edge
+- Other browsers: graceful fallback without full displacement
+- CSS Paint Worklet specular highlight requires Paint Worklet support
+- WebGPU is optional; WebGL2 and WASM backends are fallback paths
+- SSR / Node import is safe, but visual initialization runs only in browsers
+
+Unsupported browsers gracefully fall back to `backdrop-filter: blur(20px)`.
+If CSS Paint Worklet is unavailable, the specular highlight is skipped.
+The base glass blur/refraction fallback remains active.
+
+Runtime state is exposed for custom fallbacks:
+
+```css
+:root {
+  --glass-force-svg-backdrop-filter: 0; /* 0 disables, 1 forces */
+}
+
+:root[data-liquidglass-backdrop-svg="0"] .glass-panel {
+  backdrop-filter: blur(20px);
+}
+```
 
 ## Performance
 

@@ -594,6 +594,68 @@
       manager.detach(el);
     });
 
+    test('FilterManager applies saturation primitive', async () => {
+      if (!LG.supportsBackdropSvgFilter()) {
+        assert(true, 'SVG backdrop filter unsupported in this browser');
+        return;
+      }
+
+      const manager = new LG.FilterManager();
+      const filtersBefore = document.querySelectorAll('svg defs filter').length;
+      const el = document.createElement('div');
+      el.style.width = '120px';
+      el.style.height = '80px';
+      el.style.borderRadius = '12px';
+      document.body.appendChild(el);
+
+      manager.attach(el, { ...LG.DEFAULT_PARAMS, saturation: 45 });
+
+      await new Promise(r => setTimeout(r, 200));
+
+      const filters = Array.from(document.querySelectorAll('svg defs filter'));
+      const filter = filters[filtersBefore];
+      assertDefined(filter, 'Filter should be created');
+      const saturate = filter.querySelector('feColorMatrix[type="saturate"]');
+      assertDefined(saturate, 'Saturation primitive should exist');
+      assertEqual(saturate.getAttribute('values'), '1.45');
+
+      manager.detach(el);
+      el.remove();
+    });
+
+    test('FilterManager queues final render during rapid updates', async () => {
+      if (!LG.supportsBackdropSvgFilter()) {
+        assert(true, 'SVG backdrop filter unsupported in this browser');
+        return;
+      }
+
+      const manager = new LG.FilterManager({ minEncodeInterval: 0, maxEncodeInterval: 0 });
+      const filtersBefore = document.querySelectorAll('svg defs filter').length;
+      const el = document.createElement('div');
+      el.style.width = '120px';
+      el.style.height = '80px';
+      el.style.borderRadius = '12px';
+      document.body.appendChild(el);
+
+      manager.attach(el, { ...LG.DEFAULT_PARAMS, refraction: 0 });
+
+      for (let i = 0; i < 20; i++) {
+        manager.update(el, { refraction: i * 5 });
+      }
+
+      await new Promise(r => setTimeout(r, 500));
+
+      const filters = Array.from(document.querySelectorAll('svg defs filter'));
+      const filter = filters[filtersBefore];
+      assertDefined(filter, 'Filter should be created');
+      const displacement = filter.querySelector('feDisplacementMap[result="r"]');
+      assertDefined(displacement, 'Displacement primitive should exist');
+      assertEqual(displacement.getAttribute('scale'), '190');
+
+      manager.detach(el);
+      el.remove();
+    });
+
     test('FilterManager.detach removes filter', () => {
       const manager = new LG.FilterManager();
       const el = document.getElementById('test-el-3');

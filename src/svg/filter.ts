@@ -309,6 +309,20 @@ export function updateSlopeBlur(filterId: string, slopeBlur: number, slopeBlurIn
  * Check if browser supports SVG filters in backdrop-filter
  */
 export function supportsBackdropSvgFilter(): boolean {
+  if (
+    typeof navigator === 'undefined' ||
+    typeof window === 'undefined' ||
+    typeof document === 'undefined'
+  ) {
+    return false;
+  }
+
+  const force = getComputedStyle(document.documentElement)
+    .getPropertyValue('--glass-force-svg-backdrop-filter')
+    .trim();
+  if (force === '1') return true;
+  if (force === '0') return false;
+
   const isChrome = /Chrome/.test(navigator.userAgent) && /Google Inc/.test(navigator.vendor);
   const isEdgeChromium = /Edg/.test(navigator.userAgent);
   return isChrome || isEdgeChromium;

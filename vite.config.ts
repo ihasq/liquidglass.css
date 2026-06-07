@@ -67,6 +67,8 @@ export default defineConfig(({ mode }) => {
       lib: {
         entry: {
           liquidglass: resolve(__dirname, 'src/liquidglass.ts'),
+          runtime: resolve(__dirname, 'src/runtime.ts'),
+          tailwind: resolve(__dirname, 'src/tailwind.ts'),
           stylex: resolve(__dirname, 'src/ports/stylex.ts'),
           emotion: resolve(__dirname, 'src/ports/emotion.ts'),
           'styled-components': resolve(__dirname, 'src/ports/styled-components.ts'),

@@ -24,7 +24,7 @@ import {
   type LiquidGlassParams,
   type DisplacementRenderer,
 } from '../schema/parameters';
-import { getAccumulatedZRotation, normalizeAngle } from './transform';
+import { getAccumulatedZRotation, hasAnyTransform, normalizeAngle } from './transform';
 import type { PropertyDefinition, PropertyCallback } from '../css/engine';
 
 // ============================================================================
@@ -268,6 +268,7 @@ function ensureGlobalTransformObservers(): void {
 
       if (needsUpdate) {
         syncElementSpecularAngle(tracked);
+        updateTransformPolling();
       }
     }
   });
@@ -279,8 +280,7 @@ function ensureGlobalTransformObservers(): void {
     subtree: true,
   });
 
-  // Start RAF polling for animated transforms
-  startTransformPolling();
+  updateTransformPolling();
 }
 
 /**
@@ -318,11 +318,28 @@ function stopTransformPolling(): void {
   }
 }
 
+function updateTransformPolling(): void {
+  let needsPolling = false;
+  for (const element of _trackedTransformElements) {
+    if (hasAnyTransform(element)) {
+      needsPolling = true;
+      break;
+    }
+  }
+
+  if (needsPolling) {
+    startTransformPolling();
+  } else {
+    stopTransformPolling();
+  }
+}
+
 function trackTransform(element: HTMLElement): void {
   if (_trackedTransformElements.has(element)) return;
   ensureGlobalTransformObservers();
   _trackedTransformElements.add(element);
   syncElementSpecularAngle(element); // Initial sync
+  updateTransformPolling();
 }
 
 function untrackTransform(element: HTMLElement): void {
@@ -334,6 +351,10 @@ function untrackTransform(element: HTMLElement): void {
   // Stop polling if no elements are tracked
   if (_trackedTransformElements.size === 0) {
     stopTransformPolling();
+    _globalTransformMO?.disconnect();
+    _globalTransformMO = null;
+  } else {
+    updateTransformPolling();
   }
 }
 
@@ -378,6 +399,19 @@ function untrackRadius(element: HTMLElement): void {
  * never participates in the displacement chain.
  */
 function applySpecularPaint(element: HTMLElement): void {
+  const supportsPaintWorklet =
+    typeof CSS !== 'undefined' &&
+    'paintWorklet' in CSS;
+
+  if (!supportsPaintWorklet) {
+    element.dataset.liquidglassSpecular = 'fallback';
+    document.documentElement.dataset.liquidglassSpecular = 'fallback';
+    return;
+  }
+
+  element.dataset.liquidglassSpecular = 'paint';
+  document.documentElement.dataset.liquidglassSpecular = 'paint';
+
   const cur = element.style.backgroundImage;
   const tag = 'paint(liquid-glass-specular)';
   if (!cur.includes(tag)) {
@@ -386,6 +420,7 @@ function applySpecularPaint(element: HTMLElement): void {
   }
 }
 function removeSpecularPaint(element: HTMLElement): void {
+  delete element.dataset.liquidglassSpecular;
   const tag = 'paint(liquid-glass-specular)';
   const cur = element.style.backgroundImage;
   if (!cur.includes(tag)) return;
@@ -570,8 +605,14 @@ function ensureSpecularWorklet(): Promise<void> {
   }
 
   // CSS.paintWorklet is part of the Houdini Paint API and not in lib.dom yet.
-  const cssWithPaint = CSS as unknown as { paintWorklet?: Worklet };
-  if (typeof CSS === 'undefined' || !cssWithPaint.paintWorklet) {
+  const cssWithPaint =
+    typeof CSS === 'undefined'
+      ? undefined
+      : CSS as unknown as { paintWorklet?: Worklet };
+  if (!cssWithPaint?.paintWorklet) {
+    if (typeof document !== 'undefined') {
+      document.documentElement.dataset.liquidglassSpecular = 'fallback';
+    }
     if (typeof console !== 'undefined') {
       console.warn('[LiquidGlass] CSS Paint Worklet unsupported. Specular will not render.');
     }
@@ -587,6 +628,7 @@ function ensureSpecularWorklet(): Promise<void> {
     try {
       const blobUrl = URL.createObjectURL(new Blob([SPECULAR_WORKLET_SOURCE], { type: 'text/javascript' }));
       await cssWithPaint.paintWorklet!.addModule(blobUrl);
+      document.documentElement.dataset.liquidglassSpecular = 'paint';
       // Don't revoke immediately — some browsers fetch lazily.
       setTimeout(() => URL.revokeObjectURL(blobUrl), 30_000);
     } catch (err) {

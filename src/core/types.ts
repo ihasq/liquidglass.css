@@ -72,6 +72,7 @@ export interface FilterElementRefs {
   // Color tint (applied after displacement)
   colorFlood: SVGFEFloodElement;
   colorBlend: SVGFEBlendElement;
+  saturate: SVGFEColorMatrixElement;
 
   // NOTE: specular is rendered via CSS Paint API (specular-worklet.js),
   // not via the SVG filter chain. No specular-related filter primitives.
@@ -138,6 +139,9 @@ export interface FilterState {
   // Renderer switching state
   lastRenderer: string | null;     // Last used renderer (for cleanup on switch)
   renderInProgress: boolean;       // True while _render() is executing (prevents concurrent renders)
+  renderQueued: boolean;           // True when a render request arrived while rendering
+  queuedParams: import('../schema/parameters').LiquidGlassParams | null;
+  queuedIsLowRes: boolean;
 
   // Independent regen caches for displacement bitmap only. Specular is
   // rendered by CSS Paint API and needs no bitmap cache here — browser
